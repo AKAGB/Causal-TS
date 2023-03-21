@@ -113,7 +113,7 @@ def evaluate(data, X, Y, model, evaluateL2, evaluateL1, batch_size):
     return rse, rae, correlation, predict, test
 
 parser = argparse.ArgumentParser(description='PyTorch Time series forecasting')
-parser.add_argument('--device',type=str,default='cuda:5',help='')
+parser.add_argument('--device',type=str,default='cuda:6',help='')
 parser.add_argument('--data', type=str, default='./data/electricity.txt',
                     help='location of the data file')
 parser.add_argument('--model_name', type=str, default='Causal',
@@ -241,7 +241,7 @@ if __name__ == "__main__":
         rae.append(test_rae)
         corr.append(test_corr)
     pprint('\n\n')
-    pprint('10 runs average')
+    pprint('5 runs average')
     pprint('\n\n')
     pprint("valid\trse\trae\tcorr")
     pprint("mean\t{:5.4f}\t{:5.4f}\t{:5.4f}".format(np.mean(vacc), np.mean(vrae), np.mean(vcorr)))
