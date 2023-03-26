@@ -5,6 +5,26 @@ from torch.autograd import Variable
 def normal_std(x):
     return x.std() * np.sqrt((len(x) - 1.)/(len(x)))
 
+def adjust_learning_rate(optimizer, epoch, args):
+    if args.lradj==1:
+        lr_adjust = {epoch: args.lr * (0.5 ** (epoch // 1))}
+
+    elif args.lradj==2:
+        lr_adjust = {
+            0: 0.0001, 5: 0.0005, 10:0.001, 20: 0.0001, 30: 0.00005, 40: 0.00001
+            , 70: 0.000001
+        }
+
+    if epoch in lr_adjust.keys():
+        lr = lr_adjust[epoch]
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
+        print('Updating learning rate to {}'.format(lr))
+    else:
+        for param_group in optimizer.param_groups:
+            lr = param_group['lr']
+    return lr
+
 class DataLoaderS(object):
     # train and valid is the ratio of training set and validation set. test = 1 - train - valid
     def __init__(self, file_name, train, valid, device, horizon, window, normalize=2):

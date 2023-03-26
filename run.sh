@@ -40,6 +40,8 @@ python learn.py --model_name Causal --save ./model/model-electricity-causal-3.pt
 python learn.py --model_name GRU --save ./model/model-electricity-gru-3.pt --data ./data/electricity.txt --num_nodes 321 --epoch 100 --horizon 3 --hidden_size 512
 ## MTGNN
 python learn_mtgnn.py --save ./model-electricity-mtgnn-3.pt --data ./data/electricity.txt --num_nodes 321 --batch_size 16 --epochs 30 --horizon 3
+## SCINet
+python learn_scinet.py --model_name SCINet --save ./model/model-electricity-scinet-3.pt --data ./data/electricity.txt --num_nodes 321 --epoch 100 --horizon 3
 
 #### Horizon 6
 ## Causal_GRU
@@ -55,9 +57,9 @@ python learn.py --model_name GRU --save ./model/model-electricity-gru-12.pt --da
 
 #### Horizon 24
 ## Causal_GRU
-python learn.py --model_name Causal --save ./model/model-traffic-causal-24.pt --data ./data/traffic.txt --num_nodes 862 --epoch 100 --horizon 24 --hidden_size 512 --base_model GRU
+python learn.py --model_name Causal --save ./model/model-electricity-causal-24.pt --data ./data/electricity.txt --num_nodes 321 --epoch 100 --horizon 24 --hidden_size 512 --base_model GRU
 ## GRU
-python learn.py --model_name GRU --save ./model/model-traffic-gru-24.pt --data ./data/traffic.txt --num_nodes 862 --epoch 100 --horizon 24 --hidden_size 512
+python learn.py --model_name GRU --save ./model/model-electricity-gru-24.pt --data ./data/electricity.txt --num_nodes 321 --epoch 100 --horizon 24 --hidden_size 512
 
 
 # ==============

@@ -19,6 +19,69 @@ class CausalModel(nn.Module):
                 batch_first=True,
                 dropout=dropout,
             )
+        else: 
+            self.encoder = nn.LSTM(
+                input_size=d_feat,
+                hidden_size=hidden_size,
+                num_layers=num_layers,
+                batch_first=True,
+                dropout=dropout,
+            )
+
+
+        self.context_enc = nn.Linear(hidden_size, hidden_size)
+
+        self.out = nn.Sequential(
+            nn.Linear(hidden_size*2, hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(hidden_size, 1)
+        )
+
+
+    def forward(self, input):
+        x = input
+        x = x.reshape(x.shape[0]*x.shape[1], -1)
+        x = x.reshape(len(x), self.d_feat, -1)  
+        x = x.permute(0, 2, 1)  
+        features, _ = self.encoder(x)
+        features = features[:, -1, :]
+
+        #==== Front-door adjustment ====
+        # context_feas, _ = self.context_enc(x)
+        # context_feas = context_feas[:, -1, :]
+        # features = features.reshape([input.shape[0], input.shape[1], -1])
+        # context_feas = context_feas.reshape([input.shape[0], input.shape[1], -1])
+        # context_feas = context_feas.mean(1, keepdim=True).repeat(1, features.shape[1] , 1)
+        # features = torch.cat([features, context_feas], dim=-1)
+        #==== Front-door adjustment ====
+
+        #==== Front-door adjustment ====
+        features = features.reshape([input.shape[0], input.shape[1], -1])
+        context_feas = features.mean(1, keepdim=True)
+        context_feas = self.context_enc(context_feas)
+        context_feas = context_feas.repeat(1, features.shape[1] , 1)
+        features = torch.cat([features, context_feas], dim=-1)
+        #==== Front-door adjustment ====
+
+        output = self.out(features)
+
+        return output.squeeze().reshape([input.shape[0], -1])
+    
+class CausalModel_all(nn.Module):
+    def __init__(self, d_feat=6, hidden_size=64, num_layers=2, dropout=0.0, base_model="GRU"):
+        super().__init__()
+
+        self.d_feat = d_feat
+        self.hidden_size = hidden_size
+
+        if base_model == 'GRU':
+            self.encoder = nn.GRU(
+                input_size=d_feat,
+                hidden_size=hidden_size,
+                num_layers=num_layers,
+                batch_first=True,
+                dropout=dropout,
+            )
             self.context_enc = nn.GRU(
                 input_size=d_feat,
                 hidden_size=hidden_size,

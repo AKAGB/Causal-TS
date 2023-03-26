@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 import torch
 import torch.nn as nn
-from net import *
+from net_scinet import *
 import numpy as np
 
 from util import *
@@ -30,12 +30,43 @@ def pprint(*args):
 
 def get_model(args):
 
-    if args.model_name == 'GRU':
-        return GRUModel(d_feat=args.d_feat, hidden_size=args.hidden_size, num_layers=args.num_gru_layer)
+    if args.model_name == 'SCINet':
+        return SCINet(
+                output_len=args.horizon,
+                input_len=args.seq_in_len,
+                input_dim=args.num_nodes,
+                hid_size=args.hidden_size,
+                num_stacks=args.stacks,
+                num_levels=args.levels,
+                num_decoder_layer=args.num_decoder_layer,
+                concat_len=args.seq_in_len - args.horizon,
+                groups=args.groups,
+                kernel=args.kernel,
+                dropout=args.dropout,
+                single_step_output_One=args.single_step_output_One,
+                positionalE=args.positionalEcoding,
+                modified=True,
+                RIN=False
+            )
     
-    if args.model_name == 'Causal':
-        return CausalModel(d_feat=args.d_feat, hidden_size=args.hidden_size, num_layers=args.num_gru_layer, base_model=args.base_model)
-
+    elif args.model_name == 'SCINet_RIN':
+        return SCINet(
+                output_len=args.horizon,
+                input_len=args.seq_in_len,
+                input_dim=args.num_nodes,
+                hid_size=args.hidden_size,
+                num_stacks=args.stacks,
+                num_levels=args.levels,
+                num_decoder_layer=args.num_decoder_layer,
+                concat_len=args.seq_in_len - args.horizon,
+                groups=args.groups,
+                kernel=args.kernel,
+                dropout=args.dropout,
+                single_step_output_One=args.single_step_output_One,
+                positionalE=args.positionalEcoding,
+                modified=True,
+                RIN=True
+            )
     
     raise ValueError('unknown model name `%s`'%args.model_name)
 
@@ -61,7 +92,7 @@ def train(data, X, Y, model, criterion, optim, batch_size):
             tx = x[:, id, :]
             ty = y[:, id]
             output = model(tx)
-            # output = torch.squeeze(output)
+            output = torch.squeeze(output)
             scale = data.scale.expand(output.size(0), data.m)
             scale = scale[:,id]
             loss = criterion(output * scale, ty * scale)
@@ -89,7 +120,7 @@ def evaluate(data, X, Y, model, evaluateL2, evaluateL1, batch_size):
 
         predict.append(output)
 
-        # output= torch.squeeze(output)
+        output= torch.squeeze(output)
         scale = data.scale.expand(output.size(0), data.m)
         total_loss += evaluateL2(output * scale, Y * scale).item()
         total_loss_l1 += evaluateL1(output * scale, Y * scale).item()
@@ -113,10 +144,10 @@ def evaluate(data, X, Y, model, evaluateL2, evaluateL1, batch_size):
     return rse, rae, correlation, predict, test
 
 parser = argparse.ArgumentParser(description='PyTorch Time series forecasting')
-parser.add_argument('--device',type=str,default='cuda:4',help='')
+parser.add_argument('--device',type=str,default='cuda:3',help='')
 parser.add_argument('--data', type=str, default='./data/electricity.txt',
                     help='location of the data file')
-parser.add_argument('--model_name', type=str, default='Causal',
+parser.add_argument('--model_name', type=str, default='SCINet',
                     help='model')
 parser.add_argument('--log_interval', type=int, default=2000, metavar='N',
                     help='report interval')
@@ -130,11 +161,10 @@ parser.add_argument('--seq_in_len',type=int,default=24*7,help='input sequence le
 parser.add_argument('--seq_out_len',type=int,default=1,help='output sequence length')
 parser.add_argument('--horizon', type=int, default=3)
 
-parser.add_argument('--batch_size',type=int,default=1,help='batch size')
+parser.add_argument('--batch_size',type=int,default=32,help='batch size')
 parser.add_argument('--lr',type=float,default=0.0001,help='learning rate')
 parser.add_argument('--weight_decay',type=float,default=0.00001,help='weight decay rate')
-parser.add_argument('--early_stop', type=int, default=100)
-parser.add_argument('--lradj',type=int,default=1,help='lradj')
+parser.add_argument('--early_stop', type=int, default=30)
 
 parser.add_argument('--clip',type=int,default=5,help='clip')
 
@@ -145,7 +175,7 @@ parser.add_argument('--epochs',type=int,default=100,help='')
 parser.add_argument('--num_split',type=int,default=1,help='number of splits for graphs')
 parser.add_argument('--step_size',type=int,default=100,help='step_size')
 parser.add_argument('--d_feat', type=int, default=7)
-parser.add_argument('--hidden_size', type=int, default=512)
+parser.add_argument('--hidden_size', type=int, default=8)
 parser.add_argument('--num_gru_layer', type=int, default=1)
 parser.add_argument('--k_day', type=int, default=10)
 parser.add_argument('--n_neighbor', type=int, default=10)
@@ -153,6 +183,20 @@ parser.add_argument('--hidden_batch_size', type=int, default=128)
 parser.add_argument('--base_model', type=str, default='GRU',
                     help='base model of causal model')
 
+### SCINet setting
+parser.add_argument('--hidden-size', default=1.0, type=float, help='hidden channel of module')# H, EXPANSION RATE
+parser.add_argument('--INN', default=1, type=int, help='use INN or basic strategy')
+parser.add_argument('--kernel', default=5, type=int, help='kernel size')#k kernel size
+parser.add_argument('--dilation', default=1, type=int, help='dilation')
+parser.add_argument('--positionalEcoding', type = bool , default=False)
+parser.add_argument('--dropout', type=float, default=0.5)
+parser.add_argument('--groups', type=int, default=1)
+parser.add_argument('--levels', type=int, default=3)
+parser.add_argument('--num_decoder_layer', type=int, default=1)
+parser.add_argument('--stacks', type=int, default=1)
+parser.add_argument('--long_term_forecast', action='store_true', default=False)
+parser.add_argument('--RIN', type=bool, default=False)
+parser.add_argument('--single_step_output_One', type=int, default=0, help='only output the single final step')
 
 args = parser.parse_args()
 device = torch.device(args.device)
@@ -163,6 +207,7 @@ def main():
     global_log_file = args.save + '.' + 'run.log'
     Data = DataLoaderS(args.data, 0.6, 0.2, device, args.horizon, args.seq_in_len, args.normalize)
     model = get_model(args)
+    print(model)
     model = model.to(device)
     pprint(args)
     # print('The recpetive field size is', model.receptive_field)
@@ -184,9 +229,9 @@ def main():
     # At any point you can hit Ctrl + C to break out of training early.
     try:
         print('begin training')
-        for epoch in range(args.epochs ):
+        for epoch in range(1, args.epochs + 1):
             epoch_start_time = time.time()
-            # lr = adjust_learning_rate(optim.optimizer, epoch, args)
+
             train_loss = train(Data, Data.train[0], Data.train[1], model, criterion, optim, args.batch_size)
 
             val_loss, val_rae, val_corr, _, _ = evaluate(Data, Data.valid[0], Data.valid[1], model, evaluateL2, evaluateL1,

@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 import torch
 import torch.nn as nn
-from net import *
+from ns_Transformer import NS_Transformer
 import numpy as np
 
 from util import *
@@ -30,12 +30,8 @@ def pprint(*args):
 
 def get_model(args):
 
-    if args.model_name == 'GRU':
-        return GRUModel(d_feat=args.d_feat, hidden_size=args.hidden_size, num_layers=args.num_gru_layer)
-    
-    if args.model_name == 'Causal':
-        return CausalModel(d_feat=args.d_feat, hidden_size=args.hidden_size, num_layers=args.num_gru_layer, base_model=args.base_model)
-
+    if args.model_name == 'ns_transformer':
+        return NS_Transformer(args)
     
     raise ValueError('unknown model name `%s`'%args.model_name)
 
@@ -60,8 +56,11 @@ def train(data, X, Y, model, criterion, optim, batch_size):
             id = torch.tensor(id, dtype=torch.long).to(device)
             tx = x[:, id, :]
             ty = y[:, id]
-            output = model(tx)
-            # output = torch.squeeze(output)
+            tx = tx.permute(0, 2, 1)
+            dec_inp = torch.zeros_like(tx[:, -args.horizon:, :]).float()
+            dec_inp = torch.cat([tx[:, -args.label_len:, :], dec_inp], dim=1).float()
+            output = model(tx, dec_inp)[:, -1, :]
+            output = torch.squeeze(output)
             scale = data.scale.expand(output.size(0), data.m)
             scale = scale[:,id]
             loss = criterion(output * scale, ty * scale)
@@ -84,12 +83,15 @@ def evaluate(data, X, Y, model, evaluateL2, evaluateL1, batch_size):
     for X, Y in tqdm(data.get_batches(X, Y, batch_size, False), total=length):
         X = X.transpose(1,2)
         with torch.no_grad():
-            output = model(X)
+            X = X.permute(0, 2, 1)
+            dec_inp = torch.zeros_like(X[:, -args.horizon:, :]).float()
+            dec_inp = torch.cat([X[:, -args.label_len:, :], dec_inp], dim=1).float()
+            output = model(X, dec_inp)[:, -1, :]
         test.append(Y)
 
         predict.append(output)
 
-        # output= torch.squeeze(output)
+        output= torch.squeeze(output)
         scale = data.scale.expand(output.size(0), data.m)
         total_loss += evaluateL2(output * scale, Y * scale).item()
         total_loss_l1 += evaluateL1(output * scale, Y * scale).item()
@@ -113,10 +115,10 @@ def evaluate(data, X, Y, model, evaluateL2, evaluateL1, batch_size):
     return rse, rae, correlation, predict, test
 
 parser = argparse.ArgumentParser(description='PyTorch Time series forecasting')
-parser.add_argument('--device',type=str,default='cuda:4',help='')
+parser.add_argument('--device',type=str,default='cuda:3',help='')
 parser.add_argument('--data', type=str, default='./data/electricity.txt',
                     help='location of the data file')
-parser.add_argument('--model_name', type=str, default='Causal',
+parser.add_argument('--model_name', type=str, default='SCINet',
                     help='model')
 parser.add_argument('--log_interval', type=int, default=2000, metavar='N',
                     help='report interval')
@@ -130,10 +132,10 @@ parser.add_argument('--seq_in_len',type=int,default=24*7,help='input sequence le
 parser.add_argument('--seq_out_len',type=int,default=1,help='output sequence length')
 parser.add_argument('--horizon', type=int, default=3)
 
-parser.add_argument('--batch_size',type=int,default=1,help='batch size')
+parser.add_argument('--batch_size',type=int,default=32,help='batch size')
 parser.add_argument('--lr',type=float,default=0.0001,help='learning rate')
 parser.add_argument('--weight_decay',type=float,default=0.00001,help='weight decay rate')
-parser.add_argument('--early_stop', type=int, default=100)
+parser.add_argument('--early_stop', type=int, default=30)
 parser.add_argument('--lradj',type=int,default=1,help='lradj')
 
 parser.add_argument('--clip',type=int,default=5,help='clip')
@@ -154,6 +156,19 @@ parser.add_argument('--base_model', type=str, default='GRU',
                     help='base model of causal model')
 
 
+### NS-Transformer setting
+parser.add_argument('--factor', type=int, default=3, help='attn factor')
+parser.add_argument('--output_attention', action='store_true', help='whether to output attention in encoder')
+parser.add_argument('--n_heads', type=int, default=8, help='num of heads')
+parser.add_argument('--d_ff', type=int, default=2048, help='dimension of fcn')
+parser.add_argument('--activation', type=str, default='gelu', help='activation')
+parser.add_argument('--e_layers', type=int, default=2, help='num of encoder layers')
+parser.add_argument('--dropout', type=float, default=0.05, help='dropout')
+parser.add_argument('--d_layers', type=int, default=1, help='num of decoder layers')
+parser.add_argument('--p_hidden_dims', type=int, nargs='+', default=[128, 128], help='hidden layer dimensions of projector (List)')
+parser.add_argument('--p_hidden_layers', type=int, default=2, help='number of hidden layers in projector')
+parser.add_argument('--label_len', type=int, default=48, help='start token length')
+
 args = parser.parse_args()
 device = torch.device(args.device)
 torch.set_num_threads(3)
@@ -163,6 +178,7 @@ def main():
     global_log_file = args.save + '.' + 'run.log'
     Data = DataLoaderS(args.data, 0.6, 0.2, device, args.horizon, args.seq_in_len, args.normalize)
     model = get_model(args)
+    print(model)
     model = model.to(device)
     pprint(args)
     # print('The recpetive field size is', model.receptive_field)
@@ -184,9 +200,10 @@ def main():
     # At any point you can hit Ctrl + C to break out of training early.
     try:
         print('begin training')
-        for epoch in range(args.epochs ):
+        for epoch in range(args.epochs):
             epoch_start_time = time.time()
-            # lr = adjust_learning_rate(optim.optimizer, epoch, args)
+            lr = adjust_learning_rate(optim.optimizer, epoch, args)
+
             train_loss = train(Data, Data.train[0], Data.train[1], model, criterion, optim, args.batch_size)
 
             val_loss, val_rae, val_corr, _, _ = evaluate(Data, Data.valid[0], Data.valid[1], model, evaluateL2, evaluateL1,
@@ -233,7 +250,7 @@ if __name__ == "__main__":
     acc = []
     rae = []
     corr = []
-    for i in range(5):
+    for i in range(1):
         val_acc, val_rae, val_corr, test_acc, test_rae, test_corr = main()
         vacc.append(val_acc)
         vrae.append(val_rae)
@@ -242,7 +259,7 @@ if __name__ == "__main__":
         rae.append(test_rae)
         corr.append(test_corr)
     pprint('\n\n')
-    pprint('5 runs average')
+    pprint('1 runs average')
     pprint('\n\n')
     pprint("valid\trse\trae\tcorr")
     pprint("mean\t{:5.4f}\t{:5.4f}\t{:5.4f}".format(np.mean(vacc), np.mean(vrae), np.mean(vcorr)))
