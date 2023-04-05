@@ -3,6 +3,13 @@ import torch.nn as nn
 import numpy as np
 from layer import *
 
+def cal_cos_similarity(x, y): # the 2nd dimension of x and y are the same
+    xy = x.mm(torch.t(y))
+    x_norm = torch.sqrt(torch.sum(x*x, dim =1)).reshape(-1, 1)
+    y_norm = torch.sqrt(torch.sum(y*y, dim =1)).reshape(-1, 1)
+    cos_similarity = xy/x_norm.mm(torch.t(y_norm))
+    cos_similarity[cos_similarity != cos_similarity] = 0
+    return cos_similarity
 
 class CausalModel(nn.Module):
     def __init__(self, d_feat=6, hidden_size=64, num_layers=2, dropout=0.0, base_model="GRU"):
@@ -47,15 +54,6 @@ class CausalModel(nn.Module):
         features = features[:, -1, :]
 
         #==== Front-door adjustment ====
-        # context_feas, _ = self.context_enc(x)
-        # context_feas = context_feas[:, -1, :]
-        # features = features.reshape([input.shape[0], input.shape[1], -1])
-        # context_feas = context_feas.reshape([input.shape[0], input.shape[1], -1])
-        # context_feas = context_feas.mean(1, keepdim=True).repeat(1, features.shape[1] , 1)
-        # features = torch.cat([features, context_feas], dim=-1)
-        #==== Front-door adjustment ====
-
-        #==== Front-door adjustment ====
         features = features.reshape([input.shape[0], input.shape[1], -1])
         context_feas = features.mean(1, keepdim=True)
         context_feas = self.context_enc(context_feas)
@@ -66,8 +64,8 @@ class CausalModel(nn.Module):
         output = self.out(features)
 
         return output.squeeze().reshape([input.shape[0], -1])
-    
-class CausalModel_all(nn.Module):
+
+class CausalModel_ATT(nn.Module):
     def __init__(self, d_feat=6, hidden_size=64, num_layers=2, dropout=0.0, base_model="GRU"):
         super().__init__()
 
@@ -82,13 +80,6 @@ class CausalModel_all(nn.Module):
                 batch_first=True,
                 dropout=dropout,
             )
-            self.context_enc = nn.GRU(
-                input_size=d_feat,
-                hidden_size=hidden_size,
-                num_layers=num_layers,
-                batch_first=True,
-                dropout=dropout,
-            )
         else: 
             self.encoder = nn.LSTM(
                 input_size=d_feat,
@@ -97,18 +88,12 @@ class CausalModel_all(nn.Module):
                 batch_first=True,
                 dropout=dropout,
             )
-            self.context_enc = nn.LSTM(
-                input_size=d_feat,
-                hidden_size=hidden_size,
-                num_layers=num_layers,
-                batch_first=True,
-                dropout=dropout,
-            )
 
-        # for film
-        # self.out = MLP(hidden_size, hidden_size, num_layers=2)
+        self.att = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=8, dropout=dropout)
+        # self.context_enc = nn.Linear(hidden_size, hidden_size)
+
         self.out = nn.Sequential(
-            nn.Linear(hidden_size*2, hidden_size),
+            nn.Linear(hidden_size, hidden_size),
             nn.LeakyReLU(),
             nn.Linear(hidden_size, 1)
         )
@@ -122,9 +107,13 @@ class CausalModel_all(nn.Module):
         features, _ = self.encoder(x)
         features = features[:, -1, :]
 
-        mean_feat = features.mean(0, keepdim=True).repeat(features.shape[0], 1)
-        
-        output = self.out(torch.cat([features, mean_feat], dim=-1))
+        #==== Front-door adjustment ====
+        weight = cal_cos_similarity(features, features)
+        weight = torch.softmax(weight, dim=-1)
+        features = weight.mm(features)
+        #==== Front-door adjustment ====
+
+        output = self.out(features)
 
         return output.squeeze().reshape([input.shape[0], -1])
     
@@ -136,6 +125,30 @@ class GRUModel(nn.Module):
         self.d_feat = d_feat
 
         self.rnn = nn.GRU(
+            input_size=d_feat,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout,
+        )
+        self.fc_out = nn.Linear(hidden_size, 1)
+        
+
+    def forward(self, input):
+        x = input
+        x = x.reshape(x.shape[0]*x.shape[1], -1)
+        x = x.reshape(len(x), self.d_feat, -1) 
+        x = x.permute(0, 2, 1) 
+        out, _ = self.rnn(x)
+        return self.fc_out(out[:, -1, :]).squeeze().reshape([input.shape[0], -1])
+    
+class LSTMModel(nn.Module):
+    def __init__(self, d_feat=6, hidden_size=64, num_layers=2, dropout=0.0):
+        super().__init__()
+
+        self.d_feat = d_feat
+
+        self.rnn = nn.LSTM(
             input_size=d_feat,
             hidden_size=hidden_size,
             num_layers=num_layers,

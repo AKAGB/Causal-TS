@@ -33,9 +33,14 @@ def get_model(args):
     if args.model_name == 'GRU':
         return GRUModel(d_feat=args.d_feat, hidden_size=args.hidden_size, num_layers=args.num_gru_layer)
     
+    if args.model_name == 'LSTM':
+        return LSTMModel(d_feat=args.d_feat, hidden_size=args.hidden_size, num_layers=args.num_gru_layer)
+    
     if args.model_name == 'Causal':
         return CausalModel(d_feat=args.d_feat, hidden_size=args.hidden_size, num_layers=args.num_gru_layer, base_model=args.base_model)
-
+    
+    if args.model_name == 'Causal_ATT':
+        return CausalModel_ATT(d_feat=args.d_feat, hidden_size=args.hidden_size, num_layers=args.num_gru_layer, base_model=args.base_model)
     
     raise ValueError('unknown model name `%s`'%args.model_name)
 
@@ -233,7 +238,7 @@ if __name__ == "__main__":
     acc = []
     rae = []
     corr = []
-    for i in range(5):
+    for i in range(1):
         val_acc, val_rae, val_corr, test_acc, test_rae, test_corr = main()
         vacc.append(val_acc)
         vrae.append(val_rae)
@@ -242,7 +247,7 @@ if __name__ == "__main__":
         rae.append(test_rae)
         corr.append(test_corr)
     pprint('\n\n')
-    pprint('5 runs average')
+    pprint('1 runs average')
     pprint('\n\n')
     pprint("valid\trse\trae\tcorr")
     pprint("mean\t{:5.4f}\t{:5.4f}\t{:5.4f}".format(np.mean(vacc), np.mean(vrae), np.mean(vcorr)))
